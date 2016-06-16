@@ -68,7 +68,7 @@ before_script:
 script:
   # Do a very basic test that the correct product was installed.
   - RESPONSE=$(curl -s http://127.0.0.1:8888)
-  - echo $RESPONSE | grep "<title>${PRODUCT} |"
+  - echo $RESPONSE | grep "<title>"
 
   - cd $TRAVIS_BUILD_DIR/drupal/test/behat
   # behat.yml includes behat.local.yml so it must exist
@@ -76,7 +76,7 @@ script:
   # Set path to drupal root
   - export BEHAT_PARAMS="{\"extensions\":{\"Drupal\\\DrupalExtension\":{\"drupal\":{\"drupal_root\":\"$TRAVIS_BUILD_DIR/drupal\"}}}}"
   # Run global tests and tests specific to this product.
-  - ./bin/behat --tags "@global,@${PRODUCT}"
+  - ./bin/behat --tags "@global"
 
 after_failure:
   - echo $RESPONSE
