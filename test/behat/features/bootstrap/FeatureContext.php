@@ -38,9 +38,6 @@ class FeatureContext extends DrupalSubContextBase implements CustomSnippetAccept
     parent::__construct($drupal);
 
     variable_set('roomify_testing_environment', TRUE);
-    if (variable_get('roomify_accommodation_example_content') == '') {
-      roomify_accommodation_example_content_multi_property();
-    }
   }
 
   public static function getAcceptedSnippetType() { return 'regex'; }
