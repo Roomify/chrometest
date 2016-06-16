@@ -1,0 +1,95 @@
+before_install:
+- echo -e "machine github.com\n  login $CI_USER_TOKEN" >> ~/.netrc
+- export CHROME_BIN=chromium-browser
+- export DISPLAY=:99.0
+- sh -e /etc/init.d/xvfb start
+- wget http://chromedriver.storage.googleapis.com/2.20/chromedriver_linux64.zip && unzip chromedriver_linux64.zip && sudo mv chromedriver /usr/bin
+
+# Testing & Deployment for the Roomify Distro
+language: php
+
+sudo: required
+
+# We need to test on 5.4 for the cloud.
+php:
+  - 5.4
+
+mysql:
+  database: drupal
+  username: root
+  encoding: utf8
+
+before_script:
+  # Increase the MySQL connection timeout on the PHP end.
+  - echo "mysql.connect_timeout=3000" >> ~/.phpenv/versions/$(phpenv version-name)/etc/php.ini
+  - echo "default_socket_timeout=3000" >> ~/.phpenv/versions/$(phpenv version-name)/etc/php.ini
+
+  # Increase the MySQL server timetout and packet size.
+  - mysql -e "SET GLOBAL wait_timeout = 36000;"
+  - mysql -e "SET GLOBAL max_allowed_packet = 33554432;"
+
+  # Remove xdebug for the moment. We aren't generating code coverage, and it slows us down.
+  - phpenv config-rm xdebug.ini
+
+  # Install drush.
+  - export PATH="$HOME/.composer/vendor/bin:$PATH"
+  - composer -n global require drush/drush:7.*
+  # Install drush composer extension.
+  - drush dl composer-8.x-1.x
+
+  # Install required packages for behat.
+  - cd ./test/behat
+  - composer -n install
+
+  # Make the site.
+  - cd $TRAVIS_BUILD_DIR
+  # First make an archive of this module so that we can build the site from it.
+  - git archive HEAD | gzip > /tmp/roomify.tar.gz
+  - drush make project.make drupal
+
+  # Install the selected product.
+  - cd drupal
+  - php -d sendmail_path=$(which true) ~/.composer/vendor/bin/drush.php --yes site-install standard --db-url=mysql://root:@127.0.0.1/drupal --account-name=admin --account-pass=admin --site-mail=webmaster@roomify.us --site-name="foo"
+
+  # Run a webserver and wait until it is started up.
+  - drush --debug runserver "http://127.0.0.1" > ~/debug.txt 2>&1 &
+  - sleep 10
+
+  # Link test dir into working dir.
+  - ln -s $TRAVIS_BUILD_DIR/test .
+
+  # Fetch and start selenium.
+  - mkdir -p $HOME/.cache
+  - wget -nc -O $HOME/.cache/selenium-server-standalone-2.53.jar http://selenium-release.storage.googleapis.com/2.53/selenium-server-standalone-2.53.0.jar || true
+  - java -jar $HOME/.cache/selenium-server-standalone-2.53.jar -p 4444 &> /tmp/selenium.log &
+  - sleep 5
+
+
+script:
+  # Do a very basic test that the correct product was installed.
+  - RESPONSE=$(curl -s http://127.0.0.1:8888)
+  - echo $RESPONSE | grep "<title>${PRODUCT} |"
+
+  - cd $TRAVIS_BUILD_DIR/drupal/test/behat
+  # behat.yml includes behat.local.yml so it must exist
+  - touch behat.local.yml
+  # Set path to drupal root
+  - export BEHAT_PARAMS="{\"extensions\":{\"Drupal\\\DrupalExtension\":{\"drupal\":{\"drupal_root\":\"$TRAVIS_BUILD_DIR/drupal\"}}}}"
+  # Run global tests and tests specific to this product.
+  - ./bin/behat --tags "@global,@${PRODUCT}"
+
+after_failure:
+  - echo $RESPONSE
+  - echo '### DB LOG ###'
+  - cd $TRAVIS_BUILD_DIR/drupal
+  - drush sqlq 'SELECT * FROM watchdog\G'
+  - echo '### Server log ###'
+  - cat ~/debug.txt
+
+# Cache composer/drush files
+cache:
+  directories:
+    - $HOME/.composer/cache
+    - vendor
+    - test/behat/bin
+    - test/behat/vendor
